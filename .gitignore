@@ -1,0 +1,8 @@
+# Archivos sensibles
+backend/firebase-key.json
+backend/.env
+node_modules/
+
+# Editor/IDE
+.vscode/
+.idea/
