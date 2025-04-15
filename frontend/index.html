@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Turnos Médicos</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .btn { 
+            display: block; width: 90%; margin: 10px auto; 
+            padding: 15px; background: #007bff; color: white; 
+            border: none; border-radius: 5px; text-align: center; 
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Pantallas dinámicas -->
+        <div id="screen-especialidad" class="screen">
+            <h2>Elija médico:</h2>
+            <div id="medicos-list"></div>
+        </div>
+        <div id="screen-calendario" class="screen" style="display:none;">
+            <h2>Turnos disponibles:</h2>
+            <div id="calendar"></div>
+        </div>
+    </div>
+
+    <script>
+        // Obtener parámetros de URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const espId = urlParams.get('esp');
+        
+        // Cargar médicos al iniciar
+        if (espId) {
+            loadMedicos(espId);
+        }
+
+        async function loadMedicos(espId) {
+            const response = await fetch(`/api/medicos?esp=${espId}`);
+            const medicos = await response.json();
+            
+            let html = '';
+            medicos.forEach(medico => {
+                html += `<button class="btn" onclick="loadTurnos('${medico.id}')">${medico.nombre}</button>`;
+            });
+            
+            document.getElementById('medicos-list').innerHTML = html;
+        }
+
+        function loadTurnos(medicoId) {
+            // Mostrar calendario (implementar con librería como FullCalendar)
+            document.getElementById('screen-especialidad').style.display = 'none';
+            document.getElementById('screen-calendario').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
