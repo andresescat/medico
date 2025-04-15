@@ -1,1 +1,201 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agenda de Turnos Médicos</title>
+    <link href='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.css' rel='stylesheet' />
+    <link href='https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap' rel='stylesheet'>
+    <style>
+        :root {
+            --primary: #1976d2;
+            --secondary: #f5f7fa;
+            --success: #4caf50;
+        }
+        body {
+            font-family: 'Roboto', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--secondary);
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h1 {
+            color: var(--primary);
+        }
+        #calendar {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        #reserva-form {
+            display: none;
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-top: 30px;
+            max-width: 500px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input, button {
+            width: 100%;
+            padding: 12px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            font-size: 16px;
+        }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #1565c0;
+        }
+        .fc-event {
+            cursor: pointer;
+            background-color: var(--success) !important;
+            border: none !important;
+            padding: 3px !important;
+        }
+        @media (max-width: 768px) {
+            #calendar {
+                padding: 10px;
+            }
+            .fc-toolbar-title {
+                font-size: 1.2em !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Agenda de Turnos Médicos</h1>
+            <p id="medico-title"></p>
+        </header>
 
+        <div id="calendar"></div>
+
+        <div id="reserva-form">
+            <h2>Reservar Turno</h2>
+            <div class="form-group">
+                <label for="nombre">Nombre Completo</label>
+                <input type="text" id="nombre" required>
+            </div>
+            <div class="form-group">
+                <label for="telefono">Número de WhatsApp</label>
+                <input type="tel" id="telefono" required>
+            </div>
+            <input type="hidden" id="turno-id">
+            <button id="reservar-btn">Confirmar Reserva</button>
+        </div>
+    </div>
+
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/main.min.js'></script>
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@5.11.3/locales/es.min.js'></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const medico = urlParams.get('medico');
+            
+            // Mostrar nombre del médico
+            document.getElementById('medico-title').textContent = `Dr./Dra. ${medico}`;
+            
+            // Configurar calendario
+            const calendarEl = document.getElementById('calendar');
+            const calendar = new FullCalendar.Calendar(calendarEl, {
+                locale: 'es',
+                initialView: 'timeGridWeek',
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'timeGridWeek,timeGridDay'
+                },
+                slotMinTime: '08:00',
+                slotMaxTime: '20:00',
+                slotDuration: '00:30:00',
+                allDaySlot: false,
+                weekends: false,
+                events: async (fetchInfo, successCallback) => {
+                    try {
+                        const response = await fetch(`/api/turnos?medico=${encodeURIComponent(medico)}`);
+                        const turnos = await response.json();
+                        successCallback(turnos);
+                    } catch (error) {
+                        console.error('Error al cargar turnos:', error);
+                    }
+                },
+                eventClick: (info) => {
+                    document.getElementById('turno-id').value = info.event.id;
+                    document.getElementById('reserva-form').style.display = 'block';
+                    window.scrollTo({
+                        top: document.getElementById('reserva-form').offsetTop,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+            calendar.render();
+
+            // Manejar reserva
+            document.getElementById('reservar-btn').addEventListener('click', async () => {
+                const turnoId = document.getElementById('turno-id').value;
+                const nombre = document.getElementById('nombre').value.trim();
+                const telefono = document.getElementById('telefono').value.trim();
+
+                if (!nombre || !telefono) {
+                    alert('Por favor complete todos los campos');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/reservar', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            turnoId,
+                            nombre,
+                            telefono
+                        })
+                    });
+
+                    if (response.ok) {
+                        alert('¡Turno reservado con éxito! Recibirás un mensaje de confirmación.');
+                        calendar.refetchEvents();
+                        document.getElementById('reserva-form').style.display = 'none';
+                        document.getElementById('nombre').value = '';
+                        document.getElementById('telefono').value = '';
+                    } else {
+                        throw new Error('Error en la reserva');
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    alert('Ocurrió un error al reservar el turno. Por favor intente nuevamente.');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
