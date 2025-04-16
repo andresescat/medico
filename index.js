@@ -3,14 +3,15 @@ const express = require('express');
 const cors = require('cors');
 const admin = require('firebase-admin');
 const twilio = require('twilio');
+require('dotenv').config();
 
 const app = express();
 
 // Configuración de Firebase
-const serviceAccount = require('./firebase-key.json'); // Ruta actualizada;
+const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS || '{}');
 admin.initializeApp({
 admin.initializeApp({
-  credential: admin.credential.cert({
+  credential: admin.credential.cert(serviceAccount)
     projectId: process.env.FIREBASE_PROJECT_ID,
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
     privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
