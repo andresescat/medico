@@ -7,7 +7,7 @@ const twilio = require('twilio');
 const app = express();
 
 // Configuración de Firebase
-const serviceAccount = require('./firebase-key.json');
+const serviceAccount = require('./firebase-key.json'); // Ruta actualizada;
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
