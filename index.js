@@ -1,193 +1,130 @@
-require('dotenv').config();
+// Importaciones requeridas (CommonJS)
 const express = require('express');
-const cors = require('cors');
 const admin = require('firebase-admin');
 const twilio = require('twilio');
 require('dotenv').config();
 
+// Configuración inicial
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Configuración de Firebase
-const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS || '{}');
-admin.initializeApp({
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-  })
-});
-const db = admin.firestore();
-
-// Middlewares
-app.use(cors({
-  origin: process.env.WEB_URL || 'http://localhost:3000'
-}));
+// Middleware básico
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Cliente Twilio
-const twilioClient = twilio(
+// 1. Configuración de Firebase (con manejo de errores robusto)
+try {
+  const firebaseConfig = {
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') // Manejo seguro del private key
+  };
+
+  admin.initializeApp({
+    credential: admin.credential.cert(firebaseConfig),
+    databaseURL: `https://${process.env.FIREBASE_PROJECT_ID}.firebaseio.com`
+  });
+
+  console.log('✅ Firebase inicializado correctamente');
+} catch (firebaseError) {
+  console.error('❌ Error crítico al inicializar Firebase:', firebaseError);
+  process.exit(1); // Detiene la ejecución si Firebase no carga
+}
+
+// 2. Configuración de Twilio
+const twilioClient = new twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
 
-// Datos de ejemplo (puedes eliminarlos después de crear la base real)
-const initDatabase = async () => {
-  const especialidadesRef = db.collection('especialidades');
-  const snapshot = await especialidadesRef.limit(1).get();
-  
-  if (snapshot.empty) {
-    await especialidadesRef.doc('1').set({
-      nombre: 'Cardiología',
-      medicos: ['Dr. Pérez', 'Dra. Gómez']
-    });
-    
-    // Crear turnos de ejemplo
-    const turnosRef = db.collection('turnos');
-    const medicos = ['Dr. Pérez', 'Dra. Gómez'];
-    const fecha = new Date();
-    
-    for (let i = 0; i < 14; i++) {
-      const fechaTurno = new Date(fecha);
-      fechaTurno.setDate(fecha.getDate() + i);
-      
-      for (const medico of medicos) {
-        for (let hora = 9; hora <= 17; hora++) {
-          await turnosRef.add({
-            medico,
-            fecha: fechaTurno.toISOString().split('T')[0],
-            hora: `${hora}:00`,
-            estado: 'disponible',
-            paciente: '',
-            telefono: ''
-          });
-        }
-      }
-    }
-  }
-};
-// initDatabase();
-
-// API Endpoints
-
-// 1. Endpoint para WhatsApp
+// 3. Endpoint para WhatsApp (con validaciones)
 app.post('/whatsapp', async (req, res) => {
   try {
-    const userMessage = req.body.Body.trim();
-    let reply = '';
+    const userMessage = req.body?.Body?.trim() || '';
+    let response = '';
 
+    // Lógica del menú
     if (userMessage === '1') {
-      const especialidadesSnapshot = await db.collection('especialidades').get();
-      let menu = '🏥 *Consultorio Médico*\nElija especialidad:\n\n';
-      
-      especialidadesSnapshot.forEach(doc => {
-        menu += `${doc.id}. ${doc.data().nombre}\n`;
-      });
-      
-      reply = menu + '\nEnvía el número de la especialidad';
-    } 
-    else if (/^\d+$/.test(userMessage)) {
-      const especialidadRef = db.collection('especialidades').doc(userMessage);
-      const especialidadDoc = await especialidadRef.get();
-      
-      if (especialidadDoc.exists) {
-        const medicos = especialidadDoc.data().medicos;
-        if (medicos.length === 1) {
-          reply = `🔗 *${especialidadDoc.data().nombre}*\n\nPara agendar con ${medicos[0]}, visite:\n${process.env.WEB_URL}/calendar.html?medico=${encodeURIComponent(medicos[0])}`;
-        } else {
-          reply = `📋 *${especialidadDoc.data().nombre}*\n\nElija médico:\n\n${
-            medicos.map((medico, index) => `${index + 1}. ${medico}`).join('\n')
-          }\n\nEnvíe el número del médico`;
-        }
-      } else {
-        reply = '❌ Especialidad no válida. Envíe *1* para ver opciones.';
-      }
-    }
-    else {
-      reply = '❌ Opción no reconocida. Envíe *1* para comenzar.';
+      const especialidades = await getEspecialidades();
+      response = formatMenu(especialidades);
+    } else if (/^\d+$/.test(userMessage)) {
+      response = await handleSpecialtySelection(userMessage);
+    } else {
+      response = '❌ Opción no válida. Envíe *1* para comenzar.';
     }
 
+    // Respuesta en formato XML para Twilio
     res.type('text/xml').send(`
       <Response>
-        <Message>${reply}</Message>
+        <Message>${response}</Message>
       </Response>
     `);
+
   } catch (error) {
     console.error('Error en endpoint /whatsapp:', error);
-    res.type('text/xml').send(`
+    res.type('text/xml').status(500).send(`
       <Response>
-        <Message>⚠️ Error procesando su solicitud. Intente nuevamente.</Message>
+        <Message>⚠️ Error procesando su solicitud</Message>
       </Response>
     `);
   }
 });
 
-// 2. Endpoint para obtener turnos disponibles
-app.get('/api/turnos', async (req, res) => {
-  try {
-    const medico = req.query.medico;
-    const snapshot = await db.collection('turnos')
-      .where('medico', '==', medico)
-      .where('estado', '==', 'disponible')
-      .get();
+// 4. Funciones auxiliares
+async function getEspecialidades() {
+  const snapshot = await admin.firestore().collection('especialidades').get();
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+}
 
-    const turnos = [];
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      turnos.push({
-        id: doc.id,
-        title: 'Disponible',
-        start: `${data.fecha}T${data.hora}`,
-        extendedProps: {
-          medico: data.medico
-        }
-      });
-    });
+function formatMenu(especialidades) {
+  let menu = '🏥 *Consultorio Médico*\nElija especialidad:\n\n';
+  especialidades.forEach(esp => {
+    menu += `${esp.id}. ${esp.nombre}\n`;
+  });
+  return menu + '\nEnvía el número';
+}
 
-    res.json(turnos);
-  } catch (error) {
-    console.error('Error en /api/turnos:', error);
-    res.status(500).json({ error: 'Error al obtener turnos' });
+async function handleSpecialtySelection(option) {
+  const especialidad = await admin.firestore()
+    .collection('especialidades')
+    .doc(option)
+    .get();
+
+  if (!especialidad.exists) {
+    return '❌ Especialidad no válida';
   }
+
+  const medicos = especialidad.data().medicos;
+  if (medicos.length === 1) {
+    return `🔗 ${especialidad.data().nombre}\n\nPara agendar con ${medicos[0]}, visite:\n${process.env.WEB_URL}/calendar.html?medico=${encodeURIComponent(medicos[0])}`;
+  } else {
+    let submenu = `📋 ${especialidad.data().nombre}\n\nElija médico:\n\n`;
+    medicos.forEach((medico, index) => {
+      submenu += `${index + 1}. ${medico}\n`;
+    });
+    return submenu;
+  }
+}
+
+// 5. Endpoint de prueba
+app.get('/', (req, res) => {
+  res.send(`
+    <h1>Servidor de Turnos Médicos</h1>
+    <p>Endpoints disponibles:</p>
+    <ul>
+      <li>POST /whatsapp - Webhook para Twilio</li>
+      <li>GET / - Página de prueba</li>
+    </ul>
+    <p>Estado: ✅ Funcionando</p>
+  `);
 });
 
-// 3. Endpoint para reservar turnos
-app.post('/api/reservar', async (req, res) => {
-  try {
-    const { turnoId, nombre, telefono } = req.body;
-    const turnoRef = db.collection('turnos').doc(turnoId);
-    const turnoDoc = await turnoRef.get();
-
-    if (!turnoDoc.exists || turnoDoc.data().estado !== 'disponible') {
-      return res.status(400).json({ error: 'Turno no disponible' });
-    }
-
-    await turnoRef.update({
-      paciente: nombre,
-      telefono,
-      estado: 'reservado'
-    });
-
-    // Enviar confirmación por WhatsApp
-    const turnoData = turnoDoc.data();
-    const mensaje = `✅ *Confirmación de Turno*\n\nDr./Dra. ${turnoData.medico}\nFecha: ${turnoData.fecha}\nHora: ${turnoData.hora}\n\nGracias por su reserva, ${nombre}.`;
-
-    await twilioClient.messages.create({
-      body: mensaje,
-      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-      to: `whatsapp:${telefono}`
-    });
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error en /api/reservar:', error);
-    res.status(500).json({ error: 'Error al reservar turno' });
-  }
-});
-
-// Iniciar servidor
-const PORT = process.env.PORT || 3000;
+// 6. Iniciar servidor (con manejo de puerto para Render)
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor corriendo en http://localhost:${PORT}`);
+});
+
+// Manejo de errores no capturados
+process.on('unhandledRejection', (error) => {
+  console.error('⚠️ Error no capturado:', error);
 });
