@@ -1,0 +1,20 @@
+{
+  "name": "turnos-medicos-backend",
+  "version": "1.0.0",
+  "description": "API para gestión de turnos médicos",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "firebase-admin": "^11.11.0",
+    "twilio": "^4.23.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
